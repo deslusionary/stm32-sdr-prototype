@@ -19,15 +19,27 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
-//UART_HandleTypeDef huart2;
-
 /* USER CODE BEGIN PV */
+volatile uint16_t g_adcbuf[ADC_BUFLEN] = {0};
+
+volatile circbuf_uint16 g_adc_circbuf = {
+	.wrbuf = g_adcbuf,
+	.rdbuf = (uint16_t *) (g_adcbuf + (ADC_BUFLEN / 2))
+};
+
+volatile uint8_t g_adc_drdy = 0;
+
+DMACh_Inst dmach_adcdma = {
+		.DMA_inst = DMA1,
+		.channel = DMA1_Channel1,
+		.IRQn = DMA1_Channel1_IRQn
+ };
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-static void MX_GPIO_Init(void);
+//static void MX_GPIO_Init(void);
 //static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
@@ -36,8 +48,12 @@ static void MX_GPIO_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-/* USER CODE END 0 */
 
+/* USER CODE END 0 */
+void sdr_dma_init()
+{
+
+}
 /**
   * @brief  The application entry point.
   * @retval int
@@ -55,15 +71,15 @@ int main(void)
   RCC->APB1ENR1 |= RCC_APB1ENR1_USART3EN; // USART3
   RCC->AHB2ENR  |= RCC_AHB2ENR_ADCEN; // ADC
   RCC->AHB1ENR  |= RCC_AHB1ENR_DMA1EN; // DMA1
-
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  //MX_USART2_UART_Init();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOH_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /* GPIO Initialization */
-  lwio_cfg usart_tx_cfg = {
-  	.port = UART_TX_PORT,
-		.pin = UART_TX_PIN,
+  lwio_cfg console_tx_cfg = {
+  	.port = CONSOLE_UART_TX_PORT,
+		.pin = CONSOLE_UART_TX_PIN,
 		.mode = LWIO_AF, // alternate function for USART2
 		.otype = LWIO_PUSHPULL,
 		.pupd = LWIO_NOPULL,
@@ -71,9 +87,9 @@ int main(void)
 		.afsel = LWIO_AF_7
   };
 
-  lwio_cfg usart_rx_cfg = {
-  		.port = UART_RX_PORT,
-			.pin = UART_RX_PIN,
+  lwio_cfg console_rx_cfg = {
+  		.port = CONSOLE_UART_RX_PORT,
+			.pin = CONSOLE_UART_RX_PIN,
 			.mode = LWIO_AF,
 			.otype = LWIO_PUSHPULL,
 			.pupd = LWIO_NOPULL,
@@ -81,9 +97,9 @@ int main(void)
 			.afsel = LWIO_AF_7
   };
 
-  lwio_cfg adc_rxin_cfg = {
-  		.port = ADC_RXIN_PORT,
-			.pin = ADC_RXIN_PIN,
+  lwio_cfg adc_rx_cfg = {
+  		.port = ADC_RX_PORT,
+			.pin = ADC_RX_PIN,
 			.mode = LWIO_ANALOG,
 			.otype = LWIO_NOOUTPUT,
 			.pupd = LWIO_NOPULL,
@@ -91,16 +107,17 @@ int main(void)
 			.afsel = LWIO_AF_0
   };
 
-  lwio_cfg_init(&usart_tx_cfg);
-  lwio_cfg_init(&usart_rx_cfg);
-  lwio_cfg_init(&adc_rxin_cfg);
+  lwio_cfg_init(&console_tx_cfg);
+  lwio_cfg_init(&console_rx_cfg);
+  lwio_cfg_init(&adc_rx_cfg);
 
-  lwio_init(PWM_GPIO_PORT, PWM_GPIO_PIN, LWIO_OUTPUT, LWIO_PUSHPULL, LWIO_NOPULL, LWIO_SPEED_MED);
+  lwio_init(PWM_PORT, PWM_PIN, LWIO_OUTPUT, LWIO_PUSHPULL, LWIO_NOPULL, LWIO_SPEED_MED);
+  lwio_init(LD2_PORT, LD2_PIN, LWIO_OUTPUT, LWIO_PUSHPULL, LWIO_NOPULL, LWIO_SPEED_LOW); // LD2
 
   /* Peripheral Initialization */
   // uint16_t usartdiv = uart_baud_to_usartdiv(115200, 80e6, 0);
   uint16_t usartdiv = 694; // 80e6 / 115200
-  uart_init_8n1(UART_PERIPH, UART_PERIPH_IRQN, usartdiv);
+  uart_init_8n1(CONSOLE_UART, CONSOLE_UART_IRQn, usartdiv);
 
   DMACh_Inst dmach_adcdma = {
   		.DMA_inst = DMA1,
@@ -111,12 +128,11 @@ int main(void)
   /*
    * Configure DMA channel 1 for continuous conversions from ADC1
    */
-  uint16_t adcbuf[64] = {0};
 
   DMA_Cfg dmach_adcdma_cfg = {
-  		.src_periph_addr = (uint32_t) &(ADC1->DR),
-			.dest_mem_addr = (uint32_t) adcbuf,
-			.transfer_len = 64u,
+  		.src_periph_addr = (uint32_t) &(SDR_ADC->DR),
+			.dest_mem_addr = (uint32_t) g_adcbuf,
+			.transfer_len = ADC_BUFLEN,
   		.periph_sel = LL_DMA_REQUEST_0,
 			.mode = LL_DMA_DIRECTION_PERIPH_TO_MEMORY,
 			.circular_mode = LL_DMA_MODE_CIRCULAR,
@@ -125,14 +141,14 @@ int main(void)
 			.periph_datasize = LL_DMA_PDATAALIGN_HALFWORD,
 			.mem_incmode = LL_DMA_MEMORY_INCREMENT,
 			.periph_incmode = LL_DMA_PERIPH_NOINCREMENT,
-			.irq_en = DMA_CCR_TCIE | DMA_CCR_TEIE
+			.irq_en = DMA_CCR_TCIE | DMA_CCR_TEIE | DMA_CCR_HTIE
   };
 
   dma_init(&dmach_adcdma, &dmach_adcdma_cfg);
 
   ADC_Inst adc = {
-  		.adc = ADC1,
-			.IRQn = ADC1_IRQn
+  		.adc = SDR_ADC,
+			.IRQn = SDR_ADC_IRQn
   };
 
   sdr_adc_init(&adc);
@@ -141,48 +157,84 @@ int main(void)
    NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 
   /* Application */
+  uart_sendstr(CONSOLE_UART, "Data Out:\r\n");
   dma_enable(&dmach_adcdma);
   adc_start(&adc);
 
-  uart_sendstr(UART_PERIPH, "Data Out:");
-  char uartbuf[201] = {0};
-  for (int i = 0; i < 64; i++) {
-  	snprintf(uartbuf, 200, "%hu\r\n", adcbuf[i]);
-  	uart_sendstr(UART_PERIPH, uartbuf);
-  }
-//  //char *test = "Hello\n";
-//  uart_sendstr(UART_PERIPH, "\e[H\e[3B\e[5C");
-//  uart_sendstr(UART_PERIPH, "All good students read the");
-//  uart_sendstr(UART_PERIPH, "\e[1B\e[21D");
-//  uart_sendstr(UART_PERIPH, "\e[5m");
-//  uart_sendstr(UART_PERIPH, "Reference Manual");
-//  uart_sendstr(UART_PERIPH, "\e[H\e[0m");
-//  uart_sendstr(UART_PERIPH, "Input:");
+//  char uartbuf[201] = {0};
+//  for (int i = 0; i < 64; i++) {
+//  	snprintf(uartbuf, 200, "%hu\r\n", adcbuf[i]);
+//  	uart_sendstr(CONSOLE_UART, uartbuf);
+//  }
+  int cnt = 0;
+  while (1) {
+  	while(!g_adc_drdy);
+  	__disable_irq();
+  	g_adc_drdy = 0;
+  	__enable_irq();
 
-  while (1)
-  {
-  	HAL_Delay(500);
-  	//uart_send(UART_PERIPH, test, 6); // Send only first 3 characters, not null byte
-  	//uart_sendbyte(UART_PERIPH, 'A');
-  	//uart_sendstr(UART_PERIPH, test);
-  	lwioTogglePin(LD2_GPIO_Port, LD2_Pin);
+  	cnt++;
+  	lwioTogglePin(PWM_PORT, PWM_PIN);
+
+  	if (cnt == 2) {
+  		__disable_irq();
+  		for (int i = 0; i < ADC_BUFLEN; i++) {
+  			char uartbuf[50];
+  			snprintf(uartbuf, 200, "%d: %hu\r\n", i, g_adcbuf[i]);
+  		  uart_sendstr(CONSOLE_UART, uartbuf);
+  		}
+  		while (1);
+  	}
   }
 }
 
-void DMA1_Channel1_IRQHandler() {
+static inline void swap_circbuf_uint16(volatile circbuf_uint16 *circbuf) {
+	uint16_t *tmp = circbuf->rdbuf;
+	circbuf->rdbuf = circbuf->wrbuf;
+	circbuf->wrbuf = tmp;
+}
+
+
+/**
+ * @brief GPIO initialization routine for the STM32 SDR.
+ * @param None
+ * @retval None
+ */
+//void sdr_gpio_init()
+//{
+//
+//}
+
+void DMA1_Channel1_IRQHandler()
+{
 	NVIC_ClearPendingIRQ(DMA1_Channel1_IRQn);
-	NVIC_DisableIRQ(DMA1_Channel1_IRQn);
+	uint32_t isr = DMA1->ISR;
+
+	if (isr & DMA_ISR_TEIF1) {
+		uart_sendstr(CONSOLE_UART, "DMA CH 1 Error\n");
+		Error_Handler();
+	}
+
+	// Callback stuff on the status word only here?
+	swap_circbuf_uint16(&g_adc_circbuf);
+
+	if (g_adc_drdy != 0) Error_Handler();
+	g_adc_drdy = 1u;
+
+	DMA1->IFCR = DMA_IFCR_CGIF1;
+	//NVIC_DisableIRQ(DMA1_Channel1_IRQn);
 }
+
 
 /**
  * @brief USART2 interrupt service routine.
  * @retval None
  */
-void USART2_IRQHandler() {
+void USART2_IRQHandler()
+{
 
 	// Clear Pending IRQ in NVIC
 	NVIC_ClearPendingIRQ(USART2_IRQn);
-	lwioSetPin(PWM_GPIO_PORT, PWM_GPIO_PIN);
 
 	// Read ISR status
 	uint32_t status = USART2->ISR;
@@ -193,47 +245,6 @@ void USART2_IRQHandler() {
 		uart_rxecho_cb(USART2, status);
 	} else {
 		// TODO: do something? light an LED? take note of getting a different interrupt?
-	}
-	lwioClearPin(PWM_GPIO_PORT, PWM_GPIO_PIN);
-
-}
-
-/**
- * @brief UART RX interrupt callback function. Echoes received byte and issues VT100 color change commands.
- * 				Assumes 8N1 UART.
- * @param uart pointer to USART peripheral
- * @param status USART interrupt status
- * @retval None
- */
-void uart_rxecho_cb(USART_TypeDef *uart, uint32_t status)
-{
-	// This is really too much stuff to do within an ISR. Future work would be to refactor such that all
-	// this processing is done in main(), with the UART RX interrupt writing the received byte into a single
-	// byte buffer for main() to process
-
-	char c = (char) (0xFFu & uart->RDR); // Are typecasts useful here? since RDR is a uint16_t
-
-	//uart_sendbyte(uart, c);
-
-	char *txstr;
-	switch (c) {
-		case 'R':
-			txstr = "\e[31m";
-			uart_sendstr(uart, txstr);
-			break;
-
-		case 'G':
-			txstr = "\e[32m";
-			uart_sendstr(uart, txstr);
-			break;
-
-		case 'B':
-			txstr = "\e[34m";
-			uart_sendstr(uart, txstr);
-			break;
-
-		default:
-			uart_sendbyte(uart, c);
 	}
 }
 
@@ -412,37 +423,37 @@ void SystemClock_Config(void)
   * @param None
   * @retval None
   */
-static void MX_GPIO_Init(void)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-/* USER CODE BEGIN MX_GPIO_Init_1 */
-/* USER CODE END MX_GPIO_Init_1 */
-
-  /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOC_CLK_ENABLE();
-  __HAL_RCC_GPIOH_CLK_ENABLE();
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : B1_Pin */
-  GPIO_InitStruct.Pin = B1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : LD2_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
-
-/* USER CODE BEGIN MX_GPIO_Init_2 */
-/* USER CODE END MX_GPIO_Init_2 */
-}
+//static void MX_GPIO_Init(void)
+//{
+//  GPIO_InitTypeDef GPIO_InitStruct = {0};
+///* USER CODE BEGIN MX_GPIO_Init_1 */
+///* USER CODE END MX_GPIO_Init_1 */
+//
+//  /* GPIO Ports Clock Enable */
+//  __HAL_RCC_GPIOC_CLK_ENABLE();
+//  __HAL_RCC_GPIOH_CLK_ENABLE();
+//  __HAL_RCC_GPIOA_CLK_ENABLE();
+//  __HAL_RCC_GPIOB_CLK_ENABLE();
+//
+//  /*Configure GPIO pin Output Level */
+//  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+//
+//  /*Configure GPIO pin : B1_Pin */
+//  GPIO_InitStruct.Pin = B1_Pin;
+//  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+//  GPIO_InitStruct.Pull = GPIO_NOPULL;
+//  HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
+//
+//  /*Configure GPIO pin : LD2_Pin */
+//  GPIO_InitStruct.Pin = LD2_Pin;
+//  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+//  GPIO_InitStruct.Pull = GPIO_NOPULL;
+//  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+//  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
+//
+///* USER CODE BEGIN MX_GPIO_Init_2 */
+///* USER CODE END MX_GPIO_Init_2 */
+//}
 
 /* USER CODE BEGIN 4 */
 

@@ -35,14 +35,21 @@ extern "C" {
 #include "stm32l4xx_ll_system.h"
 #include "stm32l4xx_ll_utils.h"
 #include "stm32l4xx_ll_pwr.h"
-#include "stm32l4xx_ll_gpio.h"
+//#include "stm32l4xx_ll_gpio.h"
 #include "stm32l4xx_ll_dma.h"
 
 #include "stm32l4xx_ll_exti.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "ioperiphdef.h"
+#include <constants.h>
+#include "adc.h"
+#include "lwio.h"
+#include "uart.h"
+#include "circbuf.h"
+#include "dma.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -63,10 +70,6 @@ extern "C" {
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
 
-/* USER CODE BEGIN EFP */
-
-/* USER CODE END EFP */
-
 /* Private defines -----------------------------------------------------------*/
 #define B1_Pin GPIO_PIN_13
 #define B1_GPIO_Port GPIOC
@@ -82,10 +85,6 @@ void Error_Handler(void);
 #define TCK_GPIO_Port GPIOA
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
-
-/* USER CODE BEGIN Private defines */
-
-/* USER CODE END Private defines */
 
 #ifdef __cplusplus
 }

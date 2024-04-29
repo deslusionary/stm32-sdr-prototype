@@ -3,6 +3,9 @@
  *
  *  Created on: Mar 15, 2024
  *      Author: Christopher Tinker
+ *
+ *      Skeleton of a driver for the STM32 ADC. Right now supports
+ *      only continuous mode for the 316 final project.
  */
 
 #ifndef INC_ADC_H_

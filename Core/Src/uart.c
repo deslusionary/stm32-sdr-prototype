@@ -140,6 +140,25 @@ void uart_sendstr(USART_TypeDef *uart, char *str) {
 }
 
 
+/**
+ * @brief UART RX interrupt callback function. Echoes received byte.
+ * 				Assumes 8N1 UART.
+ * @param uart pointer to USART peripheral
+ * @param status USART interrupt status
+ * @retval None
+ */
+void uart_rxecho_cb(USART_TypeDef *uart, uint32_t status)
+{
+	// This is really too much stuff to do within an ISR. Future work would be to refactor such that all
+	// this processing is done in main(), with the UART RX interrupt writing the received byte into a single
+	// byte buffer for main() to process
+
+	char c = (char) (0xFFu & uart->RDR); // Are typecasts useful here? since RDR is a uint16_t
+	uart_sendbyte(uart, c);
+}
+
+
+
 
 
 

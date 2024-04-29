@@ -48,7 +48,7 @@ void uart_disable(USART_TypeDef *, IRQn_Type IRQn);
 void uart_sendbyte(USART_TypeDef *, uint8_t c);
 void uart_send(USART_TypeDef *uart, const void *buffer, size_t length);
 void uart_sendstr(USART_TypeDef *uart, char *str);
-
+void uart_rxecho_cb(USART_TypeDef *uart, uint32_t status);
 
 // TODO: have a blocking send (SW block), and an interrupt-driven UART transmit.
 // No real way but interrupt-driven to do receives
