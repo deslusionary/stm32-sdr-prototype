@@ -18,7 +18,7 @@
 #include "stm32l476xx.h"
 
 /* Macros */
-#define DMA_CSELR_REGOFFSET (0x00A8UL)
+#define DMA_CSELR_REGOFFSET (0x00A8u)
 
 /* Data Structures */
 typedef struct {

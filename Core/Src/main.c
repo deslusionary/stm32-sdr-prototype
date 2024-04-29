@@ -20,27 +20,53 @@
 #include "main.h"
 
 /* USER CODE BEGIN PV */
+/* Private function prototypes -----------------------------------------------*/
+void SystemClock_Config(void);
+//static void MX_GPIO_Init(void);
+//static void MX_USART2_UART_Init(void);
+
+/* Peripheral Handles */
+DMACh_Inst dmach_adc = { // ADC to Mem
+		.DMA_inst = DMA1,
+		.channel = DMA1_Channel1,
+		.IRQn = DMA1_Channel1_IRQn
+ };
+
+DMACh_Inst dmach_itodec = { // Post-DDC I samples to DFSDM decimation
+		.DMA_inst = DMA2,
+		.channel = DMA2_Channel1,
+		.IRQn = DMA2_Channel1_IRQn
+};
+
+DMACh_Inst dmach_qtodec = { // Post-DDC Q samples to DFSDM decimation
+		.DMA_inst = DMA2,
+		.channel = DMA2_Channel2,
+		.IRQn = DMA2_Channel2_IRQn
+};
+
+ADC_Inst adc = {
+  		.adc = SDR_ADC,
+			.IRQn = SDR_ADC_IRQn
+  };
+
+/*
+ * Interrupt Shared Context
+ */
 volatile uint16_t g_adcbuf[ADC_BUFLEN] = {0};
 
-volatile circbuf_uint16 g_adc_circbuf = {
+volatile ppbuf_uint16 g_adc_ppbuf = {
 	.wrbuf = g_adcbuf,
 	.rdbuf = (uint16_t *) (g_adcbuf + (ADC_BUFLEN / 2))
 };
 
 volatile uint8_t g_adc_drdy = 0;
 
-DMACh_Inst dmach_adcdma = {
-		.DMA_inst = DMA1,
-		.channel = DMA1_Channel1,
-		.IRQn = DMA1_Channel1_IRQn
- };
+volatile uint16_t g_isampbuf[SDRBLOCKLEN] = {0}; // make this a ping-pong buffer
+volatile uint16_t g_qsampbuf[SDRBLOCKLEN] = {0}; // make this a ping-pong buffer
+
 
 /* USER CODE END PV */
 
-/* Private function prototypes -----------------------------------------------*/
-void SystemClock_Config(void);
-//static void MX_GPIO_Init(void);
-//static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -50,10 +76,61 @@ void SystemClock_Config(void);
 
 
 /* USER CODE END 0 */
+
+
 void sdr_dma_init()
 {
+  DMA_Cfg dmach_adc_cfg = {
+  		.src_periph_addr = (uint32_t) &(SDR_ADC->DR),
+			.dest_mem_addr = (uint32_t) g_adcbuf,
+			.transfer_len = ADC_BUFLEN,
+  		.periph_sel = LL_DMA_REQUEST_0,
+			.mode = LL_DMA_DIRECTION_PERIPH_TO_MEMORY,
+			.circular_mode = LL_DMA_MODE_CIRCULAR,
+			.priority = LL_DMA_PRIORITY_VERYHIGH,
+			.mem_datasize = LL_DMA_MDATAALIGN_HALFWORD,
+			.periph_datasize = LL_DMA_PDATAALIGN_HALFWORD,
+			.mem_incmode = LL_DMA_MEMORY_INCREMENT,
+			.periph_incmode = LL_DMA_PERIPH_NOINCREMENT,
+			.irq_en = DMA_CCR_TCIE | DMA_CCR_TEIE | DMA_CCR_HTIE
+  };
+  dma_init(&dmach_adc, &dmach_adc_cfg);
 
+  // Configure M2M DMA from DDC I samples to DFSDM FIR decimator
+  DMA_Cfg dmach_itodec_cfg = {
+    		.src_periph_addr = (uint32_t) g_isampbuf,
+  			.dest_mem_addr = (uint32_t) &(ISAMP_DFSDM_CH->CHDATINR),
+  			.transfer_len = SDRBLOCKLEN,                              // TODO: fix
+    		.periph_sel = LL_DMA_REQUEST_0,
+  			.mode = LL_DMA_DIRECTION_MEMORY_TO_MEMORY,
+  			.circular_mode = LL_DMA_MODE_NORMAL,
+  			.priority = LL_DMA_PRIORITY_HIGH,
+  			.mem_datasize = LL_DMA_MDATAALIGN_WORD,
+  			.periph_datasize = LL_DMA_PDATAALIGN_WORD,
+  			.mem_incmode = LL_DMA_MEMORY_INCREMENT,
+  			.periph_incmode = LL_DMA_PERIPH_NOINCREMENT,
+  			.irq_en = DMA_CCR_TCIE | DMA_CCR_TEIE
+    };
+  dma_init(&dmach_itodec, &dmach_itodec_cfg);
+
+  DMA_Cfg dmach_qtodec_cfg = {
+  		.src_periph_addr = (uint32_t) g_qsampbuf,
+    	.dest_mem_addr = (uint32_t) &(QSAMP_DFSDM_CH->CHDATINR),
+   		.transfer_len = SDRBLOCKLEN,                               // TODO: fix
+      .periph_sel = LL_DMA_REQUEST_0,
+   		.mode = LL_DMA_DIRECTION_MEMORY_TO_MEMORY,
+    	.circular_mode = LL_DMA_MODE_NORMAL,
+   		.priority = LL_DMA_PRIORITY_HIGH,
+    	.mem_datasize = LL_DMA_MDATAALIGN_WORD,
+   		.periph_datasize = LL_DMA_PDATAALIGN_WORD,
+    	.mem_incmode = LL_DMA_MEMORY_INCREMENT,
+   		.periph_incmode = LL_DMA_PERIPH_NOINCREMENT,
+  		.irq_en = DMA_CCR_TCIE | DMA_CCR_TEIE
+      };
+  dma_init(&dmach_qtodec, &dmach_qtodec_cfg);
 }
+
+
 /**
   * @brief  The application entry point.
   * @retval int
@@ -67,10 +144,13 @@ int main(void)
 
   /* Configure the system clock */
   SystemClock_Config();
-  RCC->APB1ENR1 |= RCC_APB1ENR1_USART2EN; // USART2 clock enable
+  RCC->APB1ENR1 |= RCC_APB1ENR1_USART2EN; // USART2
   RCC->APB1ENR1 |= RCC_APB1ENR1_USART3EN; // USART3
   RCC->AHB2ENR  |= RCC_AHB2ENR_ADCEN; // ADC
   RCC->AHB1ENR  |= RCC_AHB1ENR_DMA1EN; // DMA1
+  RCC->AHB1ENR  |= RCC_AHB1ENR_DMA2EN; // DMA2
+  RCC->APB2ENR  |= RCC_APB2ENR_DFSDM1EN; // DFSDM1
+
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -114,43 +194,20 @@ int main(void)
   lwio_init(PWM_PORT, PWM_PIN, LWIO_OUTPUT, LWIO_PUSHPULL, LWIO_NOPULL, LWIO_SPEED_MED);
   lwio_init(LD2_PORT, LD2_PIN, LWIO_OUTPUT, LWIO_PUSHPULL, LWIO_NOPULL, LWIO_SPEED_LOW); // LD2
 
+  // LED
+
   /* Peripheral Initialization */
   // uint16_t usartdiv = uart_baud_to_usartdiv(115200, 80e6, 0);
   uint16_t usartdiv = 694; // 80e6 / 115200
   uart_init_8n1(CONSOLE_UART, CONSOLE_UART_IRQn, usartdiv);
 
-  DMACh_Inst dmach_adcdma = {
-  		.DMA_inst = DMA1,
-			.channel = DMA1_Channel1,
-			.IRQn = DMA1_Channel1_IRQn
-  };
+  // DFSDM
+  dfsdm_ch_init(ISAMP_DFSDM_CH);
+  dfsdm_ch_init(QSAMP_DFSDM_CH);
+  dfsdm_filt_init(ISAMP_DFSDM_FILT, DFSDMFILT_RCH_CH0); // Ch0 w/ Filt0 - ISAMP
+  dfsdm_filt_init(QSAMP_DFSDM_FILT, DFSDMFILT_RCH_CH1); // Ch1 w/ Filt1 - QSAMP
 
-  /*
-   * Configure DMA channel 1 for continuous conversions from ADC1
-   */
-
-  DMA_Cfg dmach_adcdma_cfg = {
-  		.src_periph_addr = (uint32_t) &(SDR_ADC->DR),
-			.dest_mem_addr = (uint32_t) g_adcbuf,
-			.transfer_len = ADC_BUFLEN,
-  		.periph_sel = LL_DMA_REQUEST_0,
-			.mode = LL_DMA_DIRECTION_PERIPH_TO_MEMORY,
-			.circular_mode = LL_DMA_MODE_CIRCULAR,
-			.priority = LL_DMA_PRIORITY_VERYHIGH,
-			.mem_datasize = LL_DMA_MDATAALIGN_HALFWORD,
-			.periph_datasize = LL_DMA_PDATAALIGN_HALFWORD,
-			.mem_incmode = LL_DMA_MEMORY_INCREMENT,
-			.periph_incmode = LL_DMA_PERIPH_NOINCREMENT,
-			.irq_en = DMA_CCR_TCIE | DMA_CCR_TEIE | DMA_CCR_HTIE
-  };
-
-  dma_init(&dmach_adcdma, &dmach_adcdma_cfg);
-
-  ADC_Inst adc = {
-  		.adc = SDR_ADC,
-			.IRQn = SDR_ADC_IRQn
-  };
-
+  sdr_dma_init();
   sdr_adc_init(&adc);
 
   /* Interrupt Initialization */
@@ -158,7 +215,7 @@ int main(void)
 
   /* Application */
   uart_sendstr(CONSOLE_UART, "Data Out:\r\n");
-  dma_enable(&dmach_adcdma);
+  dma_enable(&dmach_adc);
   adc_start(&adc);
 
 //  char uartbuf[201] = {0};
@@ -176,22 +233,22 @@ int main(void)
   	cnt++;
   	lwioTogglePin(PWM_PORT, PWM_PIN);
 
-  	if (cnt == 2) {
-  		__disable_irq();
-  		for (int i = 0; i < ADC_BUFLEN; i++) {
-  			char uartbuf[50];
-  			snprintf(uartbuf, 200, "%d: %hu\r\n", i, g_adcbuf[i]);
-  		  uart_sendstr(CONSOLE_UART, uartbuf);
-  		}
-  		while (1);
-  	}
+//  	if (cnt == 2) {
+//  		__disable_irq();
+//  		for (int i = 0; i < ADC_BUFLEN; i++) {
+//  			char uartbuf[50];
+//  			snprintf(uartbuf, 200, "%d: %hu\r\n", i, g_adcbuf[i]);
+//  		  uart_sendstr(CONSOLE_UART, uartbuf);
+//  		}
+//  		while (1);
+//  	}
   }
 }
 
-static inline void swap_circbuf_uint16(volatile circbuf_uint16 *circbuf) {
-	uint16_t *tmp = circbuf->rdbuf;
-	circbuf->rdbuf = circbuf->wrbuf;
-	circbuf->wrbuf = tmp;
+static inline void swap_ppbuf_uint16(volatile ppbuf_uint16 *ppbuf) {
+	uint16_t *tmp = ppbuf->rdbuf;
+	ppbuf->rdbuf = ppbuf->wrbuf;
+	ppbuf->wrbuf = tmp;
 }
 
 
@@ -216,7 +273,7 @@ void DMA1_Channel1_IRQHandler()
 	}
 
 	// Callback stuff on the status word only here?
-	swap_circbuf_uint16(&g_adc_circbuf);
+	swap_ppbuf_uint16(&g_adc_ppbuf);
 
 	if (g_adc_drdy != 0) Error_Handler();
 	g_adc_drdy = 1u;

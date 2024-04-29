@@ -47,8 +47,9 @@ extern "C" {
 #include "adc.h"
 #include "lwio.h"
 #include "uart.h"
-#include "circbuf.h"
+#include "ppbuf.h"
 #include "dma.h"
+#include "dfsdm.h"
 #include <stdio.h>
 /* USER CODE END Includes */
 

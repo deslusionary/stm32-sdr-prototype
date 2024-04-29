@@ -28,7 +28,7 @@ void dma_init(DMACh_Inst *dmach, DMA_Cfg *cfg)
 								 | cfg->irq_en;
 
 	/* DMA_CSELR - peripheral select register */
-	volatile uint32_t *dma_cselr = (uint32_t *) (dmach->DMA_inst + DMA_CSELR_REGOFFSET);
+	volatile uint32_t *dma_cselr = (uint32_t *) (((uint32_t) dmach->DMA_inst) + DMA_CSELR_REGOFFSET);
 	uint32_t cselr_offset = (((uint32_t *) channel) - (((uint32_t *) dmach->DMA_inst) + 0x14u)) / 0x14u;
 	*dma_cselr = (*dma_cselr & ~(0xFu << cselr_offset)) | cfg->periph_sel;
 }

@@ -19,6 +19,10 @@
 #define SDR_ADC_IRQn       ADC1_IRQn
 #define CONSOLE_UART       USART2
 #define CONSOLE_UART_IRQn  USART2_IRQn
+#define ISAMP_DFSDM_CH     DFSDM_Channel0
+#define QSAMP_DFSDM_CH     DFSDM_Channel1
+#define ISAMP_DFSDM_FILT   DFSDM_Filter0
+#define QSAMP_DFSDM_FILT   DFSDM_Filter1
 
 
 /*
