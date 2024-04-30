@@ -66,7 +66,7 @@ void sdr_adc_init(ADC_Inst *inst)
 	 */
 	adc->CFGR |= ADC_CFGR_CONT; /* Enable continuous conversion mode */
 	adc->CFGR &= ~(ADC_CFGR_EXTEN); /* SW trigger only */
-	adc->SMPR1 |= (0x2u << ADC_SMPR1_SMP5_Pos); /* Add 12.5 additional cycles to sampling time */
+	//adc->SMPR1 |= (0x2u << ADC_SMPR1_SMP5_Pos); /* Add 12.5 additional cycles to sampling time */
 
 	/* Configure regular conversion sequence.
 	 * For SDR, each sequence is a single conversion on ADC12_IN5 (ADC1_IN5)

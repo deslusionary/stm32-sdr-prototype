@@ -19,6 +19,10 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
+// Debug Macro for code needed to dump a single ADC capture buffer over console UART
+#define SINGLE_CAPTURE
+
+
 /* USER CODE BEGIN PV */
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
@@ -32,13 +36,13 @@ DMACh_Inst dmach_adc = { // ADC to Mem
 		.IRQn = DMA1_Channel1_IRQn
  };
 
-DMACh_Inst dmach_itodec = { // Post-DDC I samples to DFSDM decimation
+DMACh_Inst dmach_itoidec = { // Post-DDC I samples to DFSDM decimation
 		.DMA_inst = DMA2,
 		.channel = DMA2_Channel1,
 		.IRQn = DMA2_Channel1_IRQn
 };
 
-DMACh_Inst dmach_qtodec = { // Post-DDC Q samples to DFSDM decimation
+DMACh_Inst dmach_qtoqdec = { // Post-DDC Q samples to DFSDM decimation
 		.DMA_inst = DMA2,
 		.channel = DMA2_Channel2,
 		.IRQn = DMA2_Channel2_IRQn
@@ -86,7 +90,13 @@ void sdr_dma_init()
 			.transfer_len = ADC_BUFLEN,
   		.periph_sel = LL_DMA_REQUEST_0,
 			.mode = LL_DMA_DIRECTION_PERIPH_TO_MEMORY,
+
+#ifdef SINGLE_CAPTURE
+			.circular_mode = LL_DMA_MODE_NORMAL,
+#else
 			.circular_mode = LL_DMA_MODE_CIRCULAR,
+#endif /* SINGLE_CAPTURE */
+
 			.priority = LL_DMA_PRIORITY_VERYHIGH,
 			.mem_datasize = LL_DMA_MDATAALIGN_HALFWORD,
 			.periph_datasize = LL_DMA_PDATAALIGN_HALFWORD,
@@ -97,7 +107,7 @@ void sdr_dma_init()
   dma_init(&dmach_adc, &dmach_adc_cfg);
 
   // Configure M2M DMA from DDC I samples to DFSDM FIR decimator
-  DMA_Cfg dmach_itodec_cfg = {
+  DMA_Cfg dmach_itoidec_cfg = {
     		.src_periph_addr = (uint32_t) g_isampbuf,
   			.dest_mem_addr = (uint32_t) &(ISAMP_DFSDM_CH->CHDATINR),
   			.transfer_len = SDRBLOCKLEN,                              // TODO: fix
@@ -111,9 +121,9 @@ void sdr_dma_init()
   			.periph_incmode = LL_DMA_PERIPH_NOINCREMENT,
   			.irq_en = DMA_CCR_TCIE | DMA_CCR_TEIE
     };
-  dma_init(&dmach_itodec, &dmach_itodec_cfg);
+  dma_init(&dmach_itoidec, &dmach_itoidec_cfg);
 
-  DMA_Cfg dmach_qtodec_cfg = {
+  DMA_Cfg dmach_qtoqdec_cfg = {
   		.src_periph_addr = (uint32_t) g_qsampbuf,
     	.dest_mem_addr = (uint32_t) &(QSAMP_DFSDM_CH->CHDATINR),
    		.transfer_len = SDRBLOCKLEN,                               // TODO: fix
@@ -127,7 +137,23 @@ void sdr_dma_init()
    		.periph_incmode = LL_DMA_PERIPH_NOINCREMENT,
   		.irq_en = DMA_CCR_TCIE | DMA_CCR_TEIE
       };
-  dma_init(&dmach_qtodec, &dmach_qtodec_cfg);
+  dma_init(&dmach_qtoqdec, &dmach_qtoqdec_cfg);
+}
+
+void dump_uint16buf_console(uint16_t *buf, size_t length)
+{
+	char uartbuf[40];
+	uart_sendstr(CONSOLE_UART, "{{\r\n");
+
+	int i;
+	for (i = 0; i < length; i++) {
+		snprintf(uartbuf, 40, "%hu,", buf[i]);
+		uart_sendstr(CONSOLE_UART, uartbuf);
+		if (i % 8 == 7) uart_sendstr(CONSOLE_UART, "\r\n");
+	}
+	// One final newline
+	if (i % 8 != 0) uart_sendstr(CONSOLE_UART, "\r\n");
+	uart_sendstr(CONSOLE_UART, "}}\r\n");
 }
 
 
@@ -233,15 +259,14 @@ int main(void)
   	cnt++;
   	lwioTogglePin(PWM_PORT, PWM_PIN);
 
-//  	if (cnt == 2) {
-//  		__disable_irq();
-//  		for (int i = 0; i < ADC_BUFLEN; i++) {
-//  			char uartbuf[50];
-//  			snprintf(uartbuf, 200, "%d: %hu\r\n", i, g_adcbuf[i]);
-//  		  uart_sendstr(CONSOLE_UART, uartbuf);
-//  		}
-//  		while (1);
-//  	}
+#ifdef SINGLE_CAPTURE
+
+  	if (cnt == 2) {
+  		__disable_irq();
+  		dump_uint16buf_console((uint16_t *) g_adcbuf, ADC_BUFLEN);
+  		while (1);
+  	}
+#endif /* SINGLE_CAPTURE */
   }
 }
 
@@ -280,6 +305,23 @@ void DMA1_Channel1_IRQHandler()
 
 	DMA1->IFCR = DMA_IFCR_CGIF1;
 	//NVIC_DisableIRQ(DMA1_Channel1_IRQn);
+}
+
+/**
+ * @brief ADC1 interrupt handler. Throw an error if an ADC overrun occurs.
+ */
+void ADC1_IRQHandler()
+{
+	NVIC_ClearPendingIRQ(ADC1_IRQn);
+	uint32_t isr = ADC1->ISR;
+
+	if (isr & ADC_ISR_OVR) { // OVR: ADC overrun flag
+		ADC1->ISR |= ADC_ISR_OVR; // clear OVR flag
+		adc_stop(&adc); // stop ADC
+		uart_sendstr(CONSOLE_UART, "Error: ADC1 Overrun\r\n");
+		//Error_Handler();
+		//NVIC_DisableIRQ(ADC1_IRQn);
+	}
 }
 
 
